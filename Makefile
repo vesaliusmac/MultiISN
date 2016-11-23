@@ -1,4 +1,4 @@
-SRC=GGk_default.cpp handle_arrive.cpp handle_depart.cpp class.cpp common.cpp
+SRC=GGk_default.cpp ISN_handler.cpp class.cpp common.cpp
 
 default: $(SRC)
 	g++ -g -o GGk_default $(SRC) -lm

@@ -120,7 +120,7 @@ int main(int argc, char **argv){
 	
 	/*configure simulator*/
 	static double time = 0.0; // Simulation time stamp
-	double event[event_count]={0,SIM_TIME};
+	double event[event_count]={SIM_TIME,SIM_TIME,0};
 	int next_event; // what is next event
 	double next_event_time; // what is the time of next event
 	/*read trace*/
@@ -151,7 +151,9 @@ int main(int argc, char **argv){
 	
 	
 	
-	
+	static Pkt incoming_pkt;
+	double pkt_service_time;
+	double inter_arrival;
 	/**********************/
 	/*Main simulation loop*/
 	/**********************/
@@ -195,6 +197,37 @@ int main(int argc, char **argv){
 				}
 				break;
 			case 2: // *** Event pkt arrive at aggregator
+				if(next_event_time!=event[2]){ // sanity check
+					printf("line %d: event sanity check failed\n",__LINE__);
+					return 0;
+				}
+				time = event[2]; // advance the time
+				error("%f\tpkt %d arrived at Aggregator\n",time,pkt_index);
+	
+				// determine the pkt service time
+				pkt_service_time=service_length[generate_iat(service_count,service_cdf)]*1000000;
+				
+				//fill up the pkt
+				incoming_pkt.index=pkt_index;
+				incoming_pkt.time_arrived=time;
+				incoming_pkt.service_time=pkt_service_time*freq[0]/freq[select_f]*alpha+pkt_service_time*(1-alpha);
+				incoming_pkt.time_finished=-1;
+				// insert pkt into queue			
+				queue->enQ(incoming_pkt);
+				
+				// update pkt index
+				pkt_index++;
+				// determine the next pkt arrival time
+				
+				if(exponential==0)
+					inter_arrival=arrival_length[generate_iat(arrival_count,arrival_cdf)]*1000000;
+				else
+					inter_arrival=expntl(Ta)*1000000;
+					
+				// update event 
+				event[0] = time;
+				event[2] = time + inter_arrival;
+				break;
 			default:
 				printf("event error\n");
 				return 0;

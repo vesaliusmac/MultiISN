@@ -10,7 +10,7 @@
 // #define ivy
 #define PKT_limit 3000000 // Simulation time
 #define quiet 0
-#define debug 0
+#define debug 1
 #define package_sleep 0
 #define SIM_TIME DBL_MAX
 #define Queue_length 1024
@@ -25,7 +25,7 @@
 #define server_count 12 //no of servers
 #endif
 
-#define event_count 2
+#define event_count 3
 #define num_ISN 16
 #define latency_bound 100000
 #define alpha 1.0

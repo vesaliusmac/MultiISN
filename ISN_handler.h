@@ -34,4 +34,5 @@
 // extern Server *server;
 // extern Package package;
 
+int handle_arrive(double cur_time,double* event);
 int handle_depart(double cur_time,double* event);
