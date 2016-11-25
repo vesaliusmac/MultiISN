@@ -4,6 +4,7 @@
 #define CLASS_H
 class Pkt {
 	public:
+	Pkt();
     int index;
     double time_arrived;
 	double service_time;
@@ -52,5 +53,26 @@ class Queue
 	
 };
 
-#endif
+class Agg_wait_list{
+	public:
+	Agg_wait_list();
+	int add(int which, double expired);
+	int insert(int which);
+	int remove(int which);
+	
+	int find_next_timeout();
+	
+	double getTime(int which);
+	int getCounter(int which);
+	double getArriveTime(int which);
+	
+	private:
+	int index[Queue_length];
+	double time_arrived[Queue_length];
+	double time_expired[Queue_length];
+	int counter[Queue_length];
+	int wait_length;
+
+};
 extern Pkt NULL_PKT;
+#endif

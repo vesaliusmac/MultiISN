@@ -46,6 +46,7 @@ int exponential=0;
 
 int **latency_hist,**server_idle_time_hist,**server_busy_time_hist,**server_busy_P_state_time_hist;
 double *package_idle_time_hist;
+int *Agg_latency_hist;
 int *server_idle_counter,*server_busy_counter,*server_wakeup_counter,*server_pkts_counter;
 int package_idle_counter=0;
 int pkt_index=0;
@@ -54,10 +55,11 @@ int pick;
 int map[server_count]={0};
 int check_package=0;
 
-Queue *queue;
+Queue *ISN_queue;
+Queue *Agg_receive_queue;
 Server *server;
 Package package;
-
+Agg_wait_list *wait_list;
 
 /********************** Main program******************************/
 int main(int argc, char **argv){
@@ -108,19 +110,25 @@ int main(int argc, char **argv){
 	server_wakeup_counter = create_1D_array<int>(m,0);
 	server_pkts_counter = create_1D_array<int>(m,0);
 		
-	latency_hist=create_2D_array<int>(m,bin_count,0); // per-core latency
-	server_idle_time_hist=create_2D_array<int>(m,bin_count,0); // per-core idle time
-	server_busy_time_hist=create_2D_array<int>(m,bin_count,0); // per-core busy time
+	latency_hist = create_2D_array<int>(m,bin_count,0); // per-core latency
+	server_idle_time_hist = create_2D_array<int>(m,bin_count,0); // per-core idle time
+	server_busy_time_hist = create_2D_array<int>(m,bin_count,0); // per-core busy time
 	package_idle_time_hist = create_1D_array<double>(bin_count,0); // processor idle time
+	Agg_latency_hist = create_1D_array<int>(bin_count,0); // Aggregator pkt latency
 	
 	/*create servers*/
 	server = new Server[m];
-	/*create a global queue*/
-	queue = new Queue;
+	
+	/*create ISN queue and Aggregator recv queue*/
+	ISN_queue = new Queue;
+	Agg_receive_queue = new Queue;
+	
+	/*create aggregator wait list*/
+	wait_list= new Agg_wait_list;
 	
 	/*configure simulator*/
 	static double time = 0.0; // Simulation time stamp
-	double event[event_count]={SIM_TIME,SIM_TIME,0};
+	double event[event_count]={SIM_TIME,SIM_TIME,0,SIM_TIME,SIM_TIME}; // init event
 	int next_event; // what is next event
 	double next_event_time; // what is the time of next event
 	/*read trace*/
@@ -141,6 +149,8 @@ int main(int argc, char **argv){
 	/*print system config*/
 	if(!quiet){
 		printf("\n********System Config*******\n\n");
+		printf("# of ISN %d\n",num_ISN);
+		printf("Aggregator timeout %d\n",agg_timeout);
 		printf("system load %f\n",Ts_dvfs/Ta/m);
 		printf("# of cores %d\n",m);
 		printf("selected frequency/voltage %.3f/%.3f\n",freq[select_f],voltage[select_f]);
@@ -151,14 +161,20 @@ int main(int argc, char **argv){
 	
 	
 	
-	static Pkt incoming_pkt;
+	static Pkt incoming_pkt,fetched_pkt;
 	double pkt_service_time;
 	double inter_arrival;
+	static int which_bin;
+	static int which_pkt;
+	int time_out_counter=0;
 	/**********************/
 	/*Main simulation loop*/
 	/**********************/
 	
 	while (pkt_index < PKT_limit){
+		if(pkt_index%((int)(PKT_limit/10))==0){
+			fprintf(stderr,"%d",pkt_index/((int)(PKT_limit/10)));
+		}
 		// find next event
 		next_event_time=SIM_TIME;
 		for(i=0;i<event_count;i++){
@@ -167,6 +183,14 @@ int main(int argc, char **argv){
 				next_event=i;
 			}
 		}
+		error("%f\tevent time\t",time);
+		for(i=0;i<event_count;i++){
+			if(event[i]<SIM_TIME)
+				error("%f\t",event[i]);
+			else
+				error("-1\t");
+		}
+		error("\n");
 		
 		// check which event
 		switch(next_event){
@@ -202,23 +226,31 @@ int main(int argc, char **argv){
 					return 0;
 				}
 				time = event[2]; // advance the time
+				
 				error("%f\tpkt %d arrived at Aggregator\n",time,pkt_index);
-	
-				// determine the pkt service time
+				
+				// add pkt into agg wait list
+				if(wait_list->add(pkt_index,time)<0){
+					printf("add aggregator wait list error\n");
+					return 0;
+				}
+				
+				// determine the arriving pkt service time
 				pkt_service_time=service_length[generate_iat(service_count,service_cdf)]*1000000;
 				
-				//fill up the pkt
+				//fill up the pkt info
 				incoming_pkt.index=pkt_index;
 				incoming_pkt.time_arrived=time;
 				incoming_pkt.service_time=pkt_service_time*freq[0]/freq[select_f]*alpha+pkt_service_time*(1-alpha);
 				incoming_pkt.time_finished=-1;
-				// insert pkt into queue			
-				queue->enQ(incoming_pkt);
+				
+				// send pkt and insert it into ISN's queue			
+				ISN_queue->enQ(incoming_pkt);
 				
 				// update pkt index
 				pkt_index++;
-				// determine the next pkt arrival time
 				
+				// determine the next pkt arrival time
 				if(exponential==0)
 					inter_arrival=arrival_length[generate_iat(arrival_count,arrival_cdf)]*1000000;
 				else
@@ -227,6 +259,64 @@ int main(int argc, char **argv){
 				// update event 
 				event[0] = time;
 				event[2] = time + inter_arrival;
+				event[4] = wait_list->getTime(wait_list->find_next_timeout());
+				break;
+			case 3: // *** Event aggregator receive response from ISN
+				if(next_event_time!=event[3]){ // sanity check
+					printf("line %d: event sanity check failed\n",__LINE__);
+					return 0;
+				}
+				time = event[3]; // advance the time
+				// printf("%d\n",Agg_receive_queue->getQlength());
+				while(Agg_receive_queue->getQlength()>0){ // process the response from ISN
+					fetched_pkt=Agg_receive_queue->deQ();
+					if(fetched_pkt.index==-1){
+						printf("deQ error\n");
+						return -1;
+					}
+					error("%f\tAggregator receives response %d from ISN\n",time,fetched_pkt.index);
+					wait_list->insert(fetched_pkt.index);
+					// if(wait_list->insert(fetched_pkt.index)<0){
+						// printf("insert aggregator wait list error\n");
+						// return 0;
+					// }
+					if(wait_list->getCounter(fetched_pkt.index)==num_ISN){
+						error("%f\tAggregator reply response %d back to user\n",time,fetched_pkt.index);
+						wait_list->remove(fetched_pkt.index);
+						which_bin=floor((fetched_pkt.time_finished-fetched_pkt.time_arrived)/bin_width);
+						if(which_bin<0) {printf("latency error %d\n",__LINE__); printf("%f\t%f\n",fetched_pkt.time_finished,fetched_pkt.time_arrived); return 0;}
+						if (which_bin > bin_count-1) which_bin=bin_count-1;
+						Agg_latency_hist[which_bin]++;
+					}
+				}
+				
+				event[3] = SIM_TIME;
+				event[4] = wait_list->getTime(wait_list->find_next_timeout());
+				break;
+			case 4: // *** Event aggregator pkt timeout
+				if(next_event_time!=event[4]){ // sanity check
+					printf("line %d: event sanity check failed\n",__LINE__);
+					return 0;
+				}
+				time=event[4]; // advance the time
+				
+				// find which member times out
+				which_pkt=wait_list->find_next_timeout();
+				if(time!=wait_list->getTime(which_pkt)){
+					printf("find the member who times out error\n");
+					return 0;
+				}
+				
+				error("%f\tAggregator pkt %d timeout\n",time,which_pkt);
+				time_out_counter++;
+				which_bin=floor((time-wait_list->getArriveTime(which_pkt))/bin_width);
+				
+				if(which_bin<0) {printf("latency error %d\n",__LINE__); printf("%f\t%f\n",time,wait_list->getArriveTime(which_pkt)); return 0;}
+				if (which_bin > bin_count-1) which_bin=bin_count-1;
+				Agg_latency_hist[which_bin]++;
+				wait_list->remove(which_pkt);
+				
+				event[4] = SIM_TIME;
 				break;
 			default:
 				printf("event error\n");
@@ -238,7 +328,7 @@ int main(int argc, char **argv){
 	
 	
 	// wrap up the busy/idle period counter
-	int which_bin;
+	
 	for (i=0;i<m;i++){
 		if(server[i].state==0){
 			which_bin=floor((time-server[i].time_arrived)/bin_width);
@@ -326,8 +416,9 @@ int main(int argc, char **argv){
 		printf("\n*********Result*********\n\n");
 		printf("total pkts arrived %d\n",pkt_index);
 		printf("total pkts processed %d\n",pkt_processed);
-		printf("total pkts in queue %d\n",queue->getQlength());
+		printf("total pkts in queue %d\n",ISN_queue->getQlength());
 		printf("total pkts in servers %d\n",pkt_inserver);
+		printf("total pkts timeout ratio at aggregator %f\n",time_out_counter*1.0/pkt_processed);
 		if(package_sleep!=0) printf("package idle ratio %f\n",overall_package_idle/time);
 	}
 	
@@ -364,6 +455,23 @@ int main(int argc, char **argv){
 		
 	}
 	
+	// aggregator latency
+	int total_pkts_agg=0;
+	for(i=0;i<bin_count;i++){
+		total_pkts_agg+=Agg_latency_hist[i];
+	}
+	int agg_nfp=0,agg_nnp=0;
+	temp_count=0;
+	for(i=0;i<bin_count;i++){
+		temp_count+=Agg_latency_hist[i];
+		if(temp_count>total_pkts_agg*0.95 && agg_nfp==0){
+			agg_nfp=i*bin_width;
+		}
+		if(temp_count>total_pkts_agg*0.99 && agg_nnp==0){
+			agg_nnp=i*bin_width;
+		}
+	}
+	
 	/*print results*/
 	if(!quiet){
 		printf("average latency %f\n",overall_latency/pkt_processed);
@@ -391,7 +499,7 @@ int main(int argc, char **argv){
 	}
 	
 	
-	printf("%d\t%.2f\t%f\t%f\t%d\t%d\t%d\tC%d\n",m,p,(Pa*(overall_busy_ratio+overall_wakeup_ratio)+Pc*overall_idle_ratio)*m,overall_latency/pkt_processed,nfp,nnp,0,C_state);
+	printf("%d\t%.2f\t%f\t%f\t%d\t%d\t%d\t%d\t%d\tC%d\n",m,p,(Pa*(overall_busy_ratio+overall_wakeup_ratio)+Pc*overall_idle_ratio)*m,overall_latency/pkt_processed,nfp,nnp,agg_nfp,agg_nnp,0,C_state);
 	
 	return 0;
 

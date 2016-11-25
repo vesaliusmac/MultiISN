@@ -51,7 +51,11 @@ int handle_arrive(double cur_time, double* event){
 		server[pick].state=1;
 		server_wakeup_counter[pick]++;
 		// fetch pkt from queue
-		fetched_pkt=queue->deQ();
+		fetched_pkt=ISN_queue->deQ();
+		if(fetched_pkt.index==-1){
+			printf("deQ error\n");
+			return -1;
+		}
 		// put pkt into the server
 		server[pick].cur_pkt=fetched_pkt;
 		server[pick].cur_pkt.handled=pick;
@@ -72,7 +76,7 @@ int handle_arrive(double cur_time, double* event){
 		}
 
 	} else{ // all server busy, do nothing
-		
+		error("%f\tall cores in ISN are busy\n",time);	
 	}
 	
 	//// determine the next pkt arrival time
@@ -99,7 +103,7 @@ int handle_depart(double cur_time, double* event){
 	
 	int i,pick;
 	static double time;
-	static Pkt fetched_pkt;
+	static Pkt fetched_pkt, departed_pkt;
 	time = cur_time;
 	// find which server has finished pkts
 	pick=-1;
@@ -113,8 +117,16 @@ int handle_depart(double cur_time, double* event){
 		printf("error\n"); 
 		return -1;
 	} 
-	error("%f\tpkt %d departed from server %d at time %f\n",time,server[pick].cur_pkt.index,pick,time);
+	error("%f\tpkt %d departed from server %d\n",time,server[pick].cur_pkt.index,pick);
 	server[pick].cur_pkt.time_finished=time;
+	departed_pkt=server[pick].cur_pkt;
+	error("%f\tsend response %d to Aggregator %f\t%f\n",time,departed_pkt.index,departed_pkt.time_finished,departed_pkt.time_arrived);
+	// printf("%d\n",Agg_receive_queue->getQlength());
+	if(Agg_receive_queue->enQ(departed_pkt)<0){
+		printf("agg enQ error %d\n",departed_pkt.index);
+		return -1;
+	}
+	
 	// record latency
 	int which_bin;
 	which_bin=floor((server[pick].cur_pkt.time_finished-server[pick].cur_pkt.time_arrived)/bin_width);
@@ -125,9 +137,13 @@ int handle_depart(double cur_time, double* event){
 	server_pkts_counter[pick]=server_pkts_counter[pick]+1;
 
 
-	if(queue->getQlength()>0){ // there are pkts in the queue, imediatly assign to the server
+	if(ISN_queue->getQlength()>0){ // there are pkt(s) in the queue, immediately assign to the server
 		server[pick].state=1;
-		fetched_pkt=queue->deQ();
+		fetched_pkt=ISN_queue->deQ();
+		if(fetched_pkt.index==-1){
+			printf("deQ error\n");
+			return -1;
+		}
 		server[pick].cur_pkt=fetched_pkt;
 		server[pick].cur_pkt.handled=pick;
 		server[pick].time_finished=time+server[pick].cur_pkt.service_time;
@@ -165,6 +181,7 @@ int handle_depart(double cur_time, double* event){
 		if(server[i].time_finished<event[1])
 			event[1]=server[i].time_finished;
 	}
+	event[3] = time;
 	
 	return 0;
 
