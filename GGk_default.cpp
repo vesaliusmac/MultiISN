@@ -1,5 +1,6 @@
 #include "GGk_default.h"
 #include "template_impl.tpp"
+#include "read_trace.h"
 
 // ivybridge
 #ifdef ivy
@@ -132,7 +133,22 @@ int main(int argc, char **argv){
 	int next_event; // what is next event
 	double next_event_time; // what is the time of next event
 	/*read trace*/
-	// double average_service_time;
+	if(read_trace()<0){
+		printf("read trace error\n");
+		return 0;
+	}
+	// for(i=0;i<10;i++){
+		// for(j=0;j<num_shard;j++){
+			// printf("%f\t",query_service_time[i][j]);
+		// }
+		// printf("\n");
+		// for(j=0;j<num_shard;j++){
+			// printf("%d\t",query_posting_length[i][j]);
+		// }
+		// printf("\n");
+	
+	// }
+	
 	read_dist(&average_service_time);
 	Ta=average_service_time/(m*p);
 	if(read_and_scale_dist(Ta)<0) {

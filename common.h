@@ -3,8 +3,9 @@
 #include <math.h> // Needed for log()
 #include <time.h>
 #include <stdarg.h>
+#include <string.h>
 #include <float.h>
-
+#include <assert.h>
 
 //----- Constants -------------------------------------------------------------
 // #define ivy
@@ -74,6 +75,19 @@ extern Queue *Agg_receive_queue;
 extern Server *server;
 extern Package package;
 
+extern char **query;
+extern int **result_shard;
+extern double *Agg_time;
+extern int **shard_doc_count;
+extern char **scores_query;
+extern double **scores;
+extern double **shard_scores;
+extern char **time_query;
+extern double **query_service_time;
+extern double *query_agg_time;
+extern int **query_posting_length;
+extern int row;
+extern int num_line;
 
 void error( const char* format, ... );
 template <typename T>
