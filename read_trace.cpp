@@ -358,6 +358,7 @@ int read_trace(){
 	FILE *time_file;
 	time_file = fopen("trace/merge.log", "r");
 	// char *new_line="\n";
+	
 	int shard_counter,posting_counter;
 	char const *error_str="error\n";
 	for (i=0;i<num_line_time;i++){
