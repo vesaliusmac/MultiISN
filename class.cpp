@@ -1,6 +1,6 @@
 #include "common.h"
 #include "class.h"
-
+#include <algorithm>
 
 
 Pkt::Pkt(){
@@ -9,7 +9,10 @@ Pkt::Pkt(){
 	service_time=-1;
 	time_finished=-1;
 	handled=-1;
-
+	// response_scores = new double[top_k];
+	for(int i=0;i<100;i++){
+		response_scores[i]=-1;
+	}
 }
 
 Server::Server(){
@@ -62,6 +65,10 @@ Agg_wait_list::Agg_wait_list(){
 		time_arrived[i]=-1;
 		time_expired[i]=-1;
 		counter[i]=0;
+		score_counter[i]=0;
+		for(int j=0;j<16*100;j++){
+			received_scores[i][j]=-1;
+		}
 	}
 	wait_length=0;
 }
@@ -79,10 +86,14 @@ int Agg_wait_list::add(int which, double time){
 	return -1;
 }
 
-int Agg_wait_list::insert(int which){
+int Agg_wait_list::insert(Pkt pkt){
 	for(int i=0;i<Queue_length;i++){
-		if(index[i]==which){
+		if(index[i]==pkt.index){
 			counter[i]++;
+			for(int j=0;j<100;j++){
+				received_scores[i][score_counter[i]]=pkt.response_scores[j];
+				score_counter[i]++;
+			}
 			return 0;
 		}
 	}
@@ -97,8 +108,49 @@ int Agg_wait_list::remove(int which){
 			time_arrived[i]=-1;
 			time_expired[i]=-1;
 			counter[i]=0;
+			score_counter[i]=0;
+			for(int j=0;j<16*100;j++){
+				received_scores[i][j]=-1;
+			}
 			wait_length--;
 			return 0;
+		}
+	}
+	return -1;
+}
+bool myfunction (double i,double j) { return (i>j); }
+
+
+int Agg_wait_list::sort_score(int which){
+	for(int i=0;i<Queue_length;i++){
+		if(index[i]==which){
+			// printf("before\t");
+			// for(int j=0;j<16*100;j++){
+				// printf("%f\t",received_scores[i][j]);
+			// }
+			// printf("\n");
+			// std::sort(received_scores[i],received_scores[i]+16*100);
+			std::sort(received_scores[i],received_scores[i]+16*100,myfunction);
+			// printf("after\t");
+			// for(int j=0;j<16*100;j++){
+				// printf("%f\t",received_scores[i][j]);
+			// }
+			// printf("\n");
+			return 0;
+		}
+	}
+	return -1;
+}
+
+double Agg_wait_list::getScore(int which, int howmany){
+	double temp=0;
+	for(int i=0;i<Queue_length;i++){
+		if(index[i]==which){
+			for(int j=0;j<howmany;j++){
+				if(received_scores[i][j]>0)
+					temp+=received_scores[i][j];
+			}
+			return temp;
 		}
 	}
 	return -1;

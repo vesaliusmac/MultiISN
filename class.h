@@ -1,5 +1,4 @@
 
-
 #ifndef CLASS_H
 #define CLASS_H
 class Pkt {
@@ -10,6 +9,7 @@ class Pkt {
 	double service_time;
 	double time_finished;
 	int handled;
+	double response_scores[100];
 };
 
 class Server {
@@ -57,8 +57,10 @@ class Agg_wait_list{
 	public:
 	Agg_wait_list();
 	int add(int which, double expired);
-	int insert(int which);
+	int insert(Pkt pkt);
 	int remove(int which);
+	int sort_score(int which);
+	double getScore(int which, int howmany);
 	
 	int find_next_timeout();
 	
@@ -70,6 +72,8 @@ class Agg_wait_list{
 	int index[Queue_length];
 	double time_arrived[Queue_length];
 	double time_expired[Queue_length];
+	int score_counter[Queue_length];
+	double received_scores[Queue_length][16*100];
 	int counter[Queue_length];
 	int wait_length;
 
