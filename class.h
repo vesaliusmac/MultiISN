@@ -9,8 +9,12 @@ class Pkt {
     double time_arrived;
 	double service_time;
 	double time_finished;
+	int disable_drop;
+	int reQuery_response;
 	// int handled;
+	int which_ISN;
 	int reply_drop;
+	
 	double response_scores[100];
 };
 
@@ -60,6 +64,7 @@ class Agg_wait_list{
 	Agg_wait_list();
 	int add(int which, double expired);
 	int insert(Pkt pkt);
+	// int register_reply(int which);
 	int resetCollect(int which);
 	int remove(int which);
 	int sort_score(int which);
@@ -72,6 +77,7 @@ class Agg_wait_list{
 	double getCollect(int which);
 	int getCounter(int which);
 	int getDropCounter(int which);
+	int* getDropArray(int which);
 	double getArriveTime(int which);
 	
 	private:

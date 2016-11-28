@@ -1,7 +1,7 @@
 for i in {50000..200000..10000}
 do 
 	
-	./GGk_default 10 20 $i 500000 > temp_$i &
+	./GGk_default 10 20 $i 500000 16 > temp_$i &
 	# echo $i > temp_$i &
 	
 done
@@ -20,7 +20,7 @@ for i in {50000..200000..10000}
 do 
 	
 	# ./GGk_default 10 20 $i;
-	cat temp_$i >> result/log_"$(date +"%Y_%m_%d_%H_%M_%S")";
+	cat temp_$i >> result/log_"$(date +"%Y_%m_%d_%H_%M")";
 	
 done
 

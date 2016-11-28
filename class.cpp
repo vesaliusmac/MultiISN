@@ -8,7 +8,10 @@ Pkt::Pkt(){
     time_arrived=-1;
 	service_time=-1;
 	time_finished=-1;
+	disable_drop=-1;
+	which_ISN=-1;
 	reply_drop=-1;
+	reQuery_response=-1;
 	// response_scores = new double[top_k];
 	for(int i=0;i<100;i++){
 		response_scores[i]=-1;
@@ -98,6 +101,7 @@ int Agg_wait_list::insert(Pkt pkt){
 	for(int i=0;i<Queue_length;i++){
 		if(index[i]==pkt.index){
 			if(pkt.reply_drop==1){
+				collected_ISN[i][drop_counter[i]]=pkt.which_ISN;
 				drop_counter[i]++;
 				counter[i]++;
 			}else{
@@ -112,7 +116,6 @@ int Agg_wait_list::insert(Pkt pkt){
 	}
 	return -1;
 }
-
 
 int Agg_wait_list::resetCollect(int which){
 	for(int i=0;i<Queue_length;i++){
@@ -247,6 +250,25 @@ int Agg_wait_list::getDropCounter(int which){
 		}
 	}	
 	return -1;
+}
+
+int* Agg_wait_list::getDropArray(int which){
+	int * out = new int[num_ISN];
+	// int temp=0;
+	for(int i=0;i<Queue_length;i++){
+		if(index[i]==which){
+			for(int j=0;j<num_ISN;j++){
+				if(j<drop_counter[i]){
+					out[j]=collected_ISN[i][j];
+				}else{
+					out[j]=-1;
+				}
+			}
+			return out;
+		}
+	}	
+	return NULL;
+
 }
 
 double Agg_wait_list::getArriveTime(int which){

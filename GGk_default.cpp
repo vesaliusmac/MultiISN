@@ -28,6 +28,7 @@ int m; // # of cores
 int C_state; // which c state
 int ISN_timeout; // ISN timeout
 int agg_timeout; // AGG timeout
+int reQuery_threshold; // reQuery threshold
 /*system config*/
 double Pa; //active power
 double S; //support circuit power
@@ -74,8 +75,8 @@ int top_k;
 int main(int argc, char **argv){
 	srand(time(NULL));
 	/*process input arguments*/
-	if(argc!=5) {
-		printf("use: [QPS] [top_k] [AGG timeout] [ISN timeout]\n");
+	if(argc!=6) {
+		printf("use: [QPS] [top_k] [AGG timeout] [ISN timeout] [requery threshold]\n");
 		return 0;
 	}
 	// select_f=atoi(argv[1]); // selected frequency
@@ -90,7 +91,7 @@ int main(int argc, char **argv){
 	top_k=atoi(argv[2]); // top k
 	agg_timeout = atoi(argv[3]); // AGG timeout
 	ISN_timeout = atoi(argv[4]); // ISN timeout
-	
+	reQuery_threshold = atoi(argv[5]); // requery threshold
 	/*configure the power and wakeup metrics*/
 	Pa = Pa_static*voltage[select_f]+Pa_dyn*voltage[select_f]*voltage[select_f]*freq[select_f]; 
 	S = S_static*voltage[select_f]+S_dyn*voltage[select_f]*voltage[select_f]*freq[select_f]+5; //support circuit power
@@ -217,18 +218,20 @@ int main(int argc, char **argv){
 	double Golden_score=0;
 	double Agg_timeout_score=0;
 	int dropped_ISN=0;
+	int *drop_array;
+	int wait_ISN=0;
 	/**********************/
 	/*Main simulation loop*/
 	/**********************/
 	int progress=-1;
 	while (pkt_index < PKT_limit){
 		// print progress
-		/*if(pkt_index%((int)(PKT_limit/10))==0){
+		if(pkt_index%((int)(PKT_limit/10))==0){
 			if(pkt_index/((int)(PKT_limit/10))!=progress){
-				fprintf(stderr,"%d",pkt_index/((int)(PKT_limit/10)));
+				if(!quiet) fprintf(stderr,"%d",pkt_index/((int)(PKT_limit/10)));
 				progress=pkt_index/((int)(PKT_limit/10));
 			}
-		}*/
+		}
 		
 		// find next event
 		next_event_time=SIM_TIME;
@@ -328,9 +331,11 @@ int main(int argc, char **argv){
 				incoming_pkt.time_arrived=time;
 				// incoming_pkt.service_time=pkt_service_time*freq[0]/freq[select_f]*alpha+pkt_service_time*(1-alpha);
 				incoming_pkt.time_finished=-1;
+				incoming_pkt.disable_drop=0;
 				
 				// send pkt and insert it into ISN's queue	
 				for(i=0;i<num_ISN;i++){
+					incoming_pkt.which_ISN=i;
 					ISN_queue[i].enQ(incoming_pkt);
 				}
 				// update pkt index
@@ -368,12 +373,23 @@ int main(int argc, char **argv){
 						return -1;
 					}
 					error("%f\tAggregator receives response %d from ISN\n",time,fetched_pkt.index);
+					if(fetched_pkt.reQuery_response==1)
+						error("%f\treceive reQuery response for pkt %d\n",time,fetched_pkt.index);
 					wait_list->insert(fetched_pkt);
 					// if(wait_list->insert(fetched_pkt.index)<0){
 						// printf("insert aggregator wait list error\n");
 						// return 0;
 					// }
-					if(wait_list->getCounter(fetched_pkt.index)==num_ISN){
+					dropped_ISN=wait_list->getDropCounter(fetched_pkt.index);
+					if(dropped_ISN<0){
+						printf("dropped_ISN error\n");
+						return 0;
+					}
+					if(dropped_ISN>reQuery_threshold)
+						wait_ISN=num_ISN+dropped_ISN;
+					else
+						wait_ISN=num_ISN;
+					if(wait_list->getCounter(fetched_pkt.index)==wait_ISN){
 						error("%f\tAggregator reply response %d back to user\n",time,fetched_pkt.index);
 						Agg_pkt_processed++;
 						
@@ -405,8 +421,11 @@ int main(int argc, char **argv){
 							which_bin=floor(100*Agg_timeout_score/Golden_score);
 						
 						Agg_quality_hist[which_bin]++;
-						dropped_ISN=wait_list->getDropCounter(fetched_pkt.index);
-						Agg_drop_hist[dropped_ISN]++;
+						// dropped_ISN=wait_list->getDropCounter(fetched_pkt.index);
+						if(dropped_ISN>reQuery_threshold)
+							Agg_drop_hist[0]++;
+						else
+							Agg_drop_hist[dropped_ISN]++;
 						wait_list->remove(fetched_pkt.index);
 					}
 				}
@@ -502,11 +521,36 @@ int main(int argc, char **argv){
 				
 				
 				dropped_ISN=wait_list->getDropCounter(which_pkt);
-				
+				drop_array=wait_list->getDropArray(which_pkt);
+				if(dropped_ISN>reQuery_threshold){
+					//fill up the re-query pkt info
+					incoming_pkt.index=which_pkt;
+					incoming_pkt.time_arrived=time;
+					// incoming_pkt.service_time=pkt_service_time*freq[0]/freq[select_f]*alpha+pkt_service_time*(1-alpha);
+					incoming_pkt.time_finished=-1;
+					incoming_pkt.disable_drop=1;
+					
+					// send pkt and insert it into ISN's queue	
+					for(i=0;i<dropped_ISN;i++){
+						incoming_pkt.which_ISN=drop_array[i];
+						ISN_queue[drop_array[i]].enQ(incoming_pkt);
+					}
+					error("%f\tAggregator reQuery pkt %d\n",time,which_pkt);
+					// printf("%d\t",dropped_ISN);
+					// for(i=0;i<num_ISN;i++){
+						// if(drop_array[i]>=0)
+							// printf("%d\t",drop_array[i]);
+					// }
+					// printf("\n");
+				}
 				error("%f\tAggregator check %d ISNs has dropped pkt %d after %f\n",time,dropped_ISN,which_pkt,time-wait_list->getArriveTime(which_pkt));
 				
 				wait_list->resetCollect(which_pkt);
-				
+				if(dropped_ISN>reQuery_threshold){
+					for(i=0;i<dropped_ISN;i++){
+						ISN_event[drop_array[i]][0] = time;
+					}
+				}
 				Agg_event[3] = wait_list->getCollect(wait_list->find_next_collect());
 				break;
 			default:
@@ -762,9 +806,9 @@ int main(int argc, char **argv){
 		}
 	}
 	if(!quiet){
-		printf("AGG:\t%-5d\t%d\t%d\t",num_ISN,m,p);
+		printf("AGG:\t%-5d\t%d\t",num_ISN,m);
 	}
-	printf("%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\n",time_out_counter*1.0/Agg_pkt_processed,avg_drop,avg_quality,total_power,agg_nfp,agg_nnp);
+	printf("%d\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\n",p,time_out_counter*1.0/Agg_pkt_processed,avg_drop,avg_quality,total_power,agg_nfp,agg_nnp);
 	// printf("%d\t%.2f\t%f\t%f\t%d\t%d\t%d\t%d\t%d\tC%d\n",m,p,(Pa*(overall_busy_ratio+overall_wakeup_ratio)+Pc*overall_idle_ratio)*m,overall_latency/pkt_processed,nfp,nnp,agg_nfp,agg_nnp,0,C_state);
 	
 	return 0;

@@ -58,9 +58,15 @@ int handle_arrive(int which_ISN, double cur_time, double* event){
 		}
 		// determine pkt service time
 		service_time_temp=query_service_time[fetched_pkt.index%num_line][which_ISN]*1000;
-		if(service_time_temp>ISN_timeout){// too long, dropped
-			fetched_pkt.service_time=ISN_prediction_overhead;
-			fetched_pkt.reply_drop=1;
+		if(fetched_pkt.disable_drop==0){
+			if(service_time_temp>ISN_timeout){// too long, dropped
+				fetched_pkt.service_time=ISN_prediction_overhead;
+				fetched_pkt.reply_drop=1;
+				
+			}else{
+				fetched_pkt.service_time=service_time_temp;
+				fetched_pkt.reply_drop=0;
+			}
 		}else{
 			fetched_pkt.service_time=service_time_temp;
 			fetched_pkt.reply_drop=0;
@@ -135,9 +141,11 @@ int handle_depart(int which_ISN, double cur_time, double* event, double* Agg_eve
 	
 	// put the matched docs into response
 	int result_counter=0;
-	if(server[which_ISN][pick].cur_pkt.reply_drop==1){
 	
+	if(server[which_ISN][pick].cur_pkt.reply_drop==1){
+		server[which_ISN][pick].cur_pkt.reQuery_response=1;
 	}else{
+		server[which_ISN][pick].cur_pkt.reQuery_response=0;
 		for(i=0;i<row;i++){
 			if(which_ISN==result_shard[server[which_ISN][pick].cur_pkt.index%num_line][i] && result_counter<top_k){
 				server[which_ISN][pick].cur_pkt.response_scores[result_counter]=scores[server[which_ISN][pick].cur_pkt.index%num_line][i];
@@ -157,8 +165,8 @@ int handle_depart(int which_ISN, double cur_time, double* event, double* Agg_eve
 	
 	// record latency
 	int which_bin;
-	which_bin=floor((server[which_ISN][pick].cur_pkt.time_finished-server[which_ISN][pick].cur_pkt.time_arrived)/bin_width);
-	if(which_bin<0) {printf("latency error %d\n",__LINE__); return 0;}
+	which_bin=floor((departed_pkt.time_finished-departed_pkt.time_arrived)/bin_width);
+	if(which_bin<0) {printf("%d\tpkt %d latency error %f\t%f\tline %d\n",server[which_ISN][pick].cur_pkt.reQuery_response,departed_pkt.index,server[which_ISN][pick].cur_pkt.time_finished,server[which_ISN][pick].cur_pkt.time_arrived,__LINE__); return 0;}
 	if (which_bin > bin_count-1) which_bin=bin_count-1;
 	latency_hist[which_ISN][pick][which_bin]++;
 
