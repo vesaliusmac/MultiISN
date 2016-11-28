@@ -6,7 +6,7 @@ int handle_arrive(int which_ISN, double cur_time, double* event){
 	static double time;
 	static Pkt incoming_pkt, fetched_pkt;
 	int i;
-	
+	static double service_time_temp;
 	time = cur_time; 
 
 	
@@ -57,13 +57,21 @@ int handle_arrive(int which_ISN, double cur_time, double* event){
 			return -1;
 		}
 		// determine pkt service time
-		fetched_pkt.service_time=query_service_time[fetched_pkt.index%num_line][which_ISN]*1000;
+		service_time_temp=query_service_time[fetched_pkt.index%num_line][which_ISN]*1000;
+		if(service_time_temp>ISN_timeout){// too long, dropped
+			fetched_pkt.service_time=ISN_prediction_overhead;
+			fetched_pkt.reply_drop=1;
+		}else{
+			fetched_pkt.service_time=service_time_temp;
+			fetched_pkt.reply_drop=0;
+		}
+		
 		
 		// put pkt into the server
 		server[which_ISN][pick].cur_pkt=fetched_pkt;
-		server[which_ISN][pick].cur_pkt.handled=pick;
 		server[which_ISN][pick].time_arrived=time+wake_up_latency;
 		server[which_ISN][pick].time_finished=server[which_ISN][pick].time_arrived+server[which_ISN][pick].cur_pkt.service_time;
+		
 		error("%f\tISN %d fetched pkt %d\n",time,which_ISN,server[which_ISN][pick].cur_pkt.index);		
 		error("%f\tpkt %d assigned to core %d\n",time,server[which_ISN][pick].cur_pkt.index,pick);
 		error("%f\tpkt %d should depart at time %f\n",time,server[which_ISN][pick].cur_pkt.index,server[which_ISN][pick].time_finished);
@@ -127,10 +135,14 @@ int handle_depart(int which_ISN, double cur_time, double* event, double* Agg_eve
 	
 	// put the matched docs into response
 	int result_counter=0;
-	for(i=0;i<row;i++){
-		if(which_ISN==result_shard[server[which_ISN][pick].cur_pkt.index%num_line][i] && result_counter<top_k){
-			server[which_ISN][pick].cur_pkt.response_scores[result_counter]=scores[server[which_ISN][pick].cur_pkt.index%num_line][i];
-			result_counter++;
+	if(server[which_ISN][pick].cur_pkt.reply_drop==1){
+	
+	}else{
+		for(i=0;i<row;i++){
+			if(which_ISN==result_shard[server[which_ISN][pick].cur_pkt.index%num_line][i] && result_counter<top_k){
+				server[which_ISN][pick].cur_pkt.response_scores[result_counter]=scores[server[which_ISN][pick].cur_pkt.index%num_line][i];
+				result_counter++;
+			}
 		}
 	}
 	error("%f\tISN %d has %d match docs for pkt %d\n",time,which_ISN,result_counter,departed_pkt.index);
@@ -161,7 +173,7 @@ int handle_depart(int which_ISN, double cur_time, double* event, double* Agg_eve
 			return -1;
 		}
 		server[which_ISN][pick].cur_pkt=fetched_pkt;
-		server[which_ISN][pick].cur_pkt.handled=pick;
+		// server[which_ISN][pick].cur_pkt.handled=pick;
 		server[which_ISN][pick].time_finished=time+server[which_ISN][pick].cur_pkt.service_time;
 		
 		error("%f\tpkt %d assigned to server %d\n",time,server[which_ISN][pick].cur_pkt.index,pick);

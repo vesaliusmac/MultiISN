@@ -1,3 +1,4 @@
+#include "parameter.h"
 
 #ifndef CLASS_H
 #define CLASS_H
@@ -8,7 +9,8 @@ class Pkt {
     double time_arrived;
 	double service_time;
 	double time_finished;
-	int handled;
+	// int handled;
+	int reply_drop;
 	double response_scores[100];
 };
 
@@ -58,23 +60,30 @@ class Agg_wait_list{
 	Agg_wait_list();
 	int add(int which, double expired);
 	int insert(Pkt pkt);
+	int resetCollect(int which);
 	int remove(int which);
 	int sort_score(int which);
 	double getScore(int which, int howmany);
 	
 	int find_next_timeout();
+	int find_next_collect();
 	
 	double getTime(int which);
+	double getCollect(int which);
 	int getCounter(int which);
+	int getDropCounter(int which);
 	double getArriveTime(int which);
 	
 	private:
 	int index[Queue_length];
 	double time_arrived[Queue_length];
 	double time_expired[Queue_length];
+	double time_collect[Queue_length];
 	int score_counter[Queue_length];
-	double received_scores[Queue_length][16*100];
+	double received_scores[Queue_length][num_ISN*100];
+	int collected_ISN[Queue_length][num_ISN];
 	int counter[Queue_length];
+	int drop_counter[Queue_length];
 	int wait_length;
 
 };

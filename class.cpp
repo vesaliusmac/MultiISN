@@ -8,7 +8,7 @@ Pkt::Pkt(){
     time_arrived=-1;
 	service_time=-1;
 	time_finished=-1;
-	handled=-1;
+	reply_drop=-1;
 	// response_scores = new double[top_k];
 	for(int i=0;i<100;i++){
 		response_scores[i]=-1;
@@ -59,15 +59,22 @@ int Queue::getQlength(){
 	return queue_elements_count;
 }
 
+
+
 Agg_wait_list::Agg_wait_list(){
 	for(int i=0;i<Queue_length;i++){
 		index[i]=-1;
 		time_arrived[i]=-1;
 		time_expired[i]=-1;
+		time_collect[i]=-1;
 		counter[i]=0;
+		drop_counter[i]=0;
 		score_counter[i]=0;
-		for(int j=0;j<16*100;j++){
+		for(int j=0;j<num_ISN*100;j++){
 			received_scores[i][j]=-1;
+		}
+		for(int j=0;j<num_ISN;j++){
+			collected_ISN[i][j]=-1;
 		}
 	}
 	wait_length=0;
@@ -79,6 +86,7 @@ int Agg_wait_list::add(int which, double time){
 			index[i]=which;
 			time_arrived[i]=time;
 			time_expired[i]=time+agg_timeout;
+			time_collect[i]=time+agg_collect;
 			wait_length++;
 			return 0;
 		}
@@ -89,11 +97,27 @@ int Agg_wait_list::add(int which, double time){
 int Agg_wait_list::insert(Pkt pkt){
 	for(int i=0;i<Queue_length;i++){
 		if(index[i]==pkt.index){
-			counter[i]++;
-			for(int j=0;j<100;j++){
-				received_scores[i][score_counter[i]]=pkt.response_scores[j];
-				score_counter[i]++;
+			if(pkt.reply_drop==1){
+				drop_counter[i]++;
+				counter[i]++;
+			}else{
+				counter[i]++;
+				for(int j=0;j<100;j++){
+					received_scores[i][score_counter[i]]=pkt.response_scores[j];
+					score_counter[i]++;
+				}
 			}
+			return 0;
+		}
+	}
+	return -1;
+}
+
+
+int Agg_wait_list::resetCollect(int which){
+	for(int i=0;i<Queue_length;i++){
+		if(index[i]==which){
+			time_collect[i]=SIM_TIME;
 			return 0;
 		}
 	}
@@ -107,10 +131,15 @@ int Agg_wait_list::remove(int which){
 			index[i]=-1;
 			time_arrived[i]=-1;
 			time_expired[i]=-1;
+			time_collect[i]=-1;
 			counter[i]=0;
+			drop_counter[i]=0;
 			score_counter[i]=0;
-			for(int j=0;j<16*100;j++){
+			for(int j=0;j<num_ISN*100;j++){
 				received_scores[i][j]=-1;
+			}
+			for(int j=0;j<num_ISN;j++){
+				collected_ISN[i][j]=-1;
 			}
 			wait_length--;
 			return 0;
@@ -118,6 +147,8 @@ int Agg_wait_list::remove(int which){
 	}
 	return -1;
 }
+
+
 bool myfunction (double i,double j) { return (i>j); }
 
 
@@ -168,6 +199,19 @@ int Agg_wait_list::find_next_timeout(){
 	return min_index;
 }
 
+int Agg_wait_list::find_next_collect(){
+	double min=DBL_MAX;
+	int min_index=-1;
+	for(int i=0;i<Queue_length;i++){
+		if(min>time_collect[i] && time_collect[i]>0){
+			min=time_collect[i];
+			min_index=index[i];
+		}
+	}
+	return min_index;
+}
+
+
 double Agg_wait_list::getTime(int which){
 	if(which==-1) return SIM_TIME;
 	for(int i=0;i<Queue_length;i++){
@@ -178,10 +222,28 @@ double Agg_wait_list::getTime(int which){
 	return -1;
 }
 
+double Agg_wait_list::getCollect(int which){
+	if(which==-1) return SIM_TIME;
+	for(int i=0;i<Queue_length;i++){
+		if(index[i]==which){
+			return time_collect[i];
+		}
+	}	
+	return -1;
+}
+
 int Agg_wait_list::getCounter(int which){
 	for(int i=0;i<Queue_length;i++){
 		if(index[i]==which){
 			return counter[i];
+		}
+	}	
+	return -1;
+}
+int Agg_wait_list::getDropCounter(int which){
+	for(int i=0;i<Queue_length;i++){
+		if(index[i]==which){
+			return drop_counter[i];
 		}
 	}	
 	return -1;

@@ -26,7 +26,8 @@ int select_f; // selected frequency
 int p; // QPS
 int m; // # of cores
 int C_state; // which c state
-
+int ISN_timeout; // ISN timeout
+int agg_timeout; // AGG timeout
 /*system config*/
 double Pa; //active power
 double S; //support circuit power
@@ -49,6 +50,7 @@ int ***latency_hist,***server_idle_time_hist,***server_busy_time_hist,***server_
 double **package_idle_time_hist;
 int *Agg_latency_hist;
 int *Agg_quality_hist;
+int *Agg_drop_hist;
 int **server_idle_counter,**server_busy_counter,**server_wakeup_counter,**server_pkts_counter;
 int *package_idle_counter;
 int pkt_index=0;
@@ -72,8 +74,8 @@ int top_k;
 int main(int argc, char **argv){
 	srand(time(NULL));
 	/*process input arguments*/
-	if(argc!=3) {
-		printf("use: [QPS] [top_k]\n");
+	if(argc!=5) {
+		printf("use: [QPS] [top_k] [AGG timeout] [ISN timeout]\n");
 		return 0;
 	}
 	// select_f=atoi(argv[1]); // selected frequency
@@ -86,6 +88,8 @@ int main(int argc, char **argv){
 	// C_state = atoi(argv[4]); // which c state
 	C_state=6;
 	top_k=atoi(argv[2]); // top k
+	agg_timeout = atoi(argv[3]); // AGG timeout
+	ISN_timeout = atoi(argv[4]); // ISN timeout
 	
 	/*configure the power and wakeup metrics*/
 	Pa = Pa_static*voltage[select_f]+Pa_dyn*voltage[select_f]*voltage[select_f]*freq[select_f]; 
@@ -129,6 +133,7 @@ int main(int argc, char **argv){
 	package_idle_time_hist = create_2D_array<double>(num_ISN,bin_count,0); // processor idle time
 	Agg_latency_hist = create_1D_array<int>(bin_count,0); // Aggregator pkt latency
 	Agg_quality_hist = create_1D_array<int>(101,0); // Aggregator quality (0..1..100)
+	Agg_drop_hist = create_1D_array<int>(num_ISN+1,0); // Aggregator quality (0..1..100)
 	/*create servers*/
 	server = new Server*[num_ISN];
 	for(i=0;i<num_ISN;i++){
@@ -211,18 +216,20 @@ int main(int argc, char **argv){
 	int time_out_counter=0;
 	double Golden_score=0;
 	double Agg_timeout_score=0;
+	int dropped_ISN=0;
 	/**********************/
 	/*Main simulation loop*/
 	/**********************/
 	int progress=-1;
 	while (pkt_index < PKT_limit){
 		// print progress
-		if(pkt_index%((int)(PKT_limit/10))==0){
+		/*if(pkt_index%((int)(PKT_limit/10))==0){
 			if(pkt_index/((int)(PKT_limit/10))!=progress){
 				fprintf(stderr,"%d",pkt_index/((int)(PKT_limit/10)));
 				progress=pkt_index/((int)(PKT_limit/10));
 			}
-		}
+		}*/
+		
 		// find next event
 		next_event_time=SIM_TIME;
 		for(i=0;i<num_ISN;i++){
@@ -341,6 +348,7 @@ int main(int argc, char **argv){
 				}
 				Agg_event[0] = time + inter_arrival;
 				Agg_event[2] = wait_list->getTime(wait_list->find_next_timeout());
+				Agg_event[3] = wait_list->getCollect(wait_list->find_next_collect());
 				break;
 			case 3: // *** Event aggregator receive response from ISN
 				if(next_event_ISN!=-1){ // sanity check
@@ -368,17 +376,44 @@ int main(int argc, char **argv){
 					if(wait_list->getCounter(fetched_pkt.index)==num_ISN){
 						error("%f\tAggregator reply response %d back to user\n",time,fetched_pkt.index);
 						Agg_pkt_processed++;
-						wait_list->remove(fetched_pkt.index);
+						
 						which_bin=floor((fetched_pkt.time_finished-fetched_pkt.time_arrived)/bin_width);
 						if(which_bin<0) {printf("latency error %d\n",__LINE__); printf("%f\t%f\n",fetched_pkt.time_finished,fetched_pkt.time_arrived); return 0;}
 						if (which_bin > bin_count-1) which_bin=bin_count-1;
 						Agg_latency_hist[which_bin]++;
-						Agg_quality_hist[100]++;
+						// Agg_quality_hist[100]++;
+						// log Aggregator quality
+						Golden_score=0;
+						for(i=0;i<top_k;i++){ // compute the Golden score
+							Golden_score+=scores[fetched_pkt.index%num_line][i];
+						}
+						// compute the received scores
+						Agg_timeout_score=0;
+						wait_list->sort_score(fetched_pkt.index);
+						
+						// compute the timeout score
+						Agg_timeout_score=wait_list->getScore(fetched_pkt.index,top_k);
+						error("%f\tpkt %d\tgolden %f\tagg %f\n",time,fetched_pkt.index%num_line,Golden_score,Agg_timeout_score);
+						if(Agg_timeout_score<0){
+							printf("Agg quality calculation error\n");
+							return 0;
+						}
+						
+						if(Golden_score==0)
+							which_bin=100;
+						else
+							which_bin=floor(100*Agg_timeout_score/Golden_score);
+						
+						Agg_quality_hist[which_bin]++;
+						dropped_ISN=wait_list->getDropCounter(fetched_pkt.index);
+						Agg_drop_hist[dropped_ISN]++;
+						wait_list->remove(fetched_pkt.index);
 					}
 				}
 				
 				Agg_event[1] = SIM_TIME;
 				Agg_event[2] = wait_list->getTime(wait_list->find_next_timeout());
+				Agg_event[3] = wait_list->getCollect(wait_list->find_next_collect());
 				break;
 			case 4: // *** Event aggregator pkt timeout
 				if(next_event_ISN!=-1){ // sanity check
@@ -417,7 +452,7 @@ int main(int argc, char **argv){
 				
 				// compute the timeout score
 				Agg_timeout_score=wait_list->getScore(which_pkt,top_k);
-				error("pkt %d\tgolden %f\tagg %f\n",which_pkt%num_line,Golden_score,Agg_timeout_score);
+				error("%f\tpkt %d\tgolden %f\tagg %f\n",time,which_pkt%num_line,Golden_score,Agg_timeout_score);
 				if(Agg_timeout_score<0){
 					printf("Agg quality calculation error\n");
 					return 0;
@@ -429,8 +464,53 @@ int main(int argc, char **argv){
 				wait_list->remove(which_pkt);
 				
 				Agg_event[2] = wait_list->getTime(wait_list->find_next_timeout());
+				Agg_event[3] = wait_list->getCollect(wait_list->find_next_collect());
+				break;
+			case 5: // *** Event aggregator check ISN drop
+				if(next_event_ISN!=-1){ // sanity check
+					printf("line %d: event sanity check failed\n",__LINE__);
+					return 0;
+				}
+				if(next_event_time!=Agg_event[3]){ // sanity check
+					printf("line %d: event sanity check failed\n",__LINE__);
+					return 0;
+				}
+				time=next_event_time; // advance the time
+				
+				which_pkt=wait_list->find_next_collect();
+				
+				while(Agg_receive_queue->getQlength()>0){ // process the response from ISN
+					printf("%f\tthere is pkt in the queue!?\n",time);
+					fetched_pkt=Agg_receive_queue->deQ();
+					if(fetched_pkt.index==-1){
+						printf("deQ error\n");
+						return -1;
+					}
+					error("%f\tAggregator receives response %d from ISN\n",time,fetched_pkt.index);
+					if(fetched_pkt.index!=which_pkt){
+						printf("receive different reply than expected one\n");
+						return -1;
+					
+					}
+					if(fetched_pkt.reply_drop!=1){
+						printf("should receive a dropped reply, but not\n");
+						return -1;
+					}
+					wait_list->insert(fetched_pkt);
+					
+				}
+				
+				
+				dropped_ISN=wait_list->getDropCounter(which_pkt);
+				
+				error("%f\tAggregator check %d ISNs has dropped pkt %d after %f\n",time,dropped_ISN,which_pkt,time-wait_list->getArriveTime(which_pkt));
+				
+				wait_list->resetCollect(which_pkt);
+				
+				Agg_event[3] = wait_list->getCollect(wait_list->find_next_collect());
 				break;
 			default:
+				
 				printf("event error\n");
 				return 0;
 		}
@@ -627,9 +707,20 @@ int main(int argc, char **argv){
 		total_pkts_quality_agg+=Agg_quality_hist[i];
 	}
 	for(i=0;i<101;i++){
-		avg_quality=Agg_quality_hist[i]*1.0*i;
+		avg_quality+=Agg_quality_hist[i]*1.0*i;
 	}
 	avg_quality=avg_quality/total_pkts_quality_agg;
+	
+	// ISN drop
+	int total_pkts_drop=0;
+	double avg_drop=0;
+	for(i=0;i<num_ISN+1;i++){
+		total_pkts_drop+=Agg_drop_hist[i];
+	}
+	for(i=0;i<num_ISN+1;i++){
+		avg_drop+=Agg_drop_hist[i]*1.0*i;
+	}
+	avg_drop=avg_drop/total_pkts_drop;
 	
 	/*print results*/
 	if(!quiet){
@@ -659,15 +750,21 @@ int main(int argc, char **argv){
 		// }
 	// }
 	double total_power=0;
-	printf("%-5s\t%-6s\t%-6s\t%-12s\t%-12s\t%-12s\t%-7s\n","ISN","Util.","power","avg_latency","95th_latency","99th_latency","C_state");
 	for(i=0;i<num_ISN;i++){
-		printf("%-5d\t%1.4f\t%2.3f\t%7.4f\t%-12d\t%-12d\tC%-6d\n",i,overall_busy_ratio[i],
-		(Pa*(overall_busy_ratio[i]+overall_wakeup_ratio[i])+Pc*overall_idle_ratio[i])*m,
-		overall_latency[i]/pkt_processed[i],nfp[i],nnp[i],C_state);
 		total_power+=(Pa*(overall_busy_ratio[i]+overall_wakeup_ratio[i])+Pc*overall_idle_ratio[i])*m;
 	}
-	printf("AGG:\t%-5d\t%d\t%d\t",num_ISN,m,p);
-	printf("%.4f\t%.4f\t%.4f\t%d\t%d\n",time_out_counter*1.0/Agg_pkt_processed,avg_quality,total_power,agg_nfp,agg_nnp);
+	if(!quiet){
+		printf("%-5s\t%-6s\t%-6s\t%-12s\t%-12s\t%-12s\t%-7s\n","ISN","Util.","power","avg_latency","95th_latency","99th_latency","C_state");
+		for(i=0;i<num_ISN;i++){
+			printf("%-5d\t%1.4f\t%2.3f\t%7.4f\t%-12d\t%-12d\tC%-6d\n",i,overall_busy_ratio[i],
+			(Pa*(overall_busy_ratio[i]+overall_wakeup_ratio[i])+Pc*overall_idle_ratio[i])*m,
+			overall_latency[i]/pkt_processed[i],nfp[i],nnp[i],C_state);
+		}
+	}
+	if(!quiet){
+		printf("AGG:\t%-5d\t%d\t%d\t",num_ISN,m,p);
+	}
+	printf("%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\n",time_out_counter*1.0/Agg_pkt_processed,avg_drop,avg_quality,total_power,agg_nfp,agg_nnp);
 	// printf("%d\t%.2f\t%f\t%f\t%d\t%d\t%d\t%d\t%d\tC%d\n",m,p,(Pa*(overall_busy_ratio+overall_wakeup_ratio)+Pc*overall_idle_ratio)*m,overall_latency/pkt_processed,nfp,nnp,agg_nfp,agg_nnp,0,C_state);
 	
 	return 0;
