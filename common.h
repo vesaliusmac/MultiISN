@@ -40,6 +40,7 @@ extern double **package_idle_time_hist;
 extern int *Agg_latency_hist;
 extern int **server_idle_counter,**server_busy_counter,**server_wakeup_counter,**server_pkts_counter;
 extern int *package_idle_counter;
+extern double *ser;
 
 extern int pkt_index;
 extern int pick;

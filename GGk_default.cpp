@@ -54,6 +54,8 @@ int *Agg_quality_hist;
 int *Agg_drop_hist;
 int **server_idle_counter,**server_busy_counter,**server_wakeup_counter,**server_pkts_counter;
 int *package_idle_counter;
+double arr=0;
+double *ser;
 int pkt_index=0;
 
 double **ISN_event;
@@ -98,19 +100,19 @@ int main(int argc, char **argv){
 	
 	switch(C_state){
 		case 1:
-			wake_up_latency=1;
+			wake_up_latency=0.01;
 			Pc=0.5*Pa;
 			break;
 		case 3:
-			wake_up_latency=59;
+			wake_up_latency=0.059;
 			Pc=0.708255*voltage[select_f];
 			break;
 		case 6:
-			wake_up_latency=89;
+			wake_up_latency=0.089;
 			Pc=0;
 			break;
 		default:
-			wake_up_latency=1;
+			wake_up_latency=0.01;
 			Pc=0.5*Pa;
 			C_state=1;
 			printf("input C-state %d does not exist!! use C1 state by default\n");
@@ -127,6 +129,7 @@ int main(int argc, char **argv){
 	server_wakeup_counter = create_2D_array<int>(num_ISN,m,0);
 	server_pkts_counter = create_2D_array<int>(num_ISN,m,0);
 	package_idle_counter = create_1D_array<int>(num_ISN,0);
+	ser = create_1D_array<double>(num_ISN,0);
 	
 	latency_hist = create_3D_array<int>(num_ISN,m,bin_count,0); // per-core latency
 	server_idle_time_hist = create_3D_array<int>(num_ISN,m,bin_count,0); // per-core idle time
@@ -177,7 +180,7 @@ int main(int argc, char **argv){
 		// printf("\n");
 	
 	// }
-	Ta=1.0/p*1000000;
+	Ta=1.0/p*1000;
 	exponential=1;
 	// read_dist(&average_service_time);
 	// Ta=average_service_time/(m*p);
@@ -220,6 +223,7 @@ int main(int argc, char **argv){
 	int dropped_ISN=0;
 	int *drop_array;
 	int wait_ISN=0;
+	
 	/**********************/
 	/*Main simulation loop*/
 	/**********************/
@@ -343,10 +347,10 @@ int main(int argc, char **argv){
 				
 				// determine the next pkt arrival time
 				if(exponential==0)
-					inter_arrival=arrival_length[generate_iat(arrival_count,arrival_cdf)]*1000000;
+					inter_arrival=arrival_length[generate_iat(arrival_count,arrival_cdf)]*1000;
 				else
 					inter_arrival=expntl(Ta);
-					
+				arr+=inter_arrival;
 				// update event 
 				for(i=0;i<num_ISN;i++){
 					ISN_event[i][0] = time;
@@ -381,10 +385,10 @@ int main(int argc, char **argv){
 						// return 0;
 					// }
 					dropped_ISN=wait_list->getDropCounter(fetched_pkt.index);
-					if(dropped_ISN<0){
-						printf("dropped_ISN error\n");
-						return 0;
-					}
+					// if(dropped_ISN<0){
+						// printf("dropped_ISN error\n");
+						// return 0;
+					// }
 					if(dropped_ISN>reQuery_threshold)
 						wait_ISN=num_ISN+dropped_ISN;
 					else
@@ -415,7 +419,7 @@ int main(int argc, char **argv){
 							return 0;
 						}
 						
-						if(Golden_score==0)
+						if(Golden_score==0 || dropped_ISN==0)
 							which_bin=100;
 						else
 							which_bin=floor(100*Agg_timeout_score/Golden_score);
@@ -619,8 +623,11 @@ int main(int argc, char **argv){
 	for(k=0;k<num_ISN;k++){
 		for(j=0;j<m;j++){
 			for(i=0;i<bin_count;i++){
-				per_core_idle[k][j]+=server_idle_time_hist[k][j][i]*i;
-				per_core_busy[k][j]+=server_busy_time_hist[k][j][i]*i;
+				per_core_idle[k][j]+=(server_idle_time_hist[k][j][i]*i);
+				per_core_busy[k][j]+=(server_busy_time_hist[k][j][i]*i);
+				// if(k==0 && j==0){
+					// printf("%d\t%d\n",server_idle_time_hist[k][j][i],server_busy_time_hist[k][j][i]);
+				// }
 			}
 			per_core_wakeup[k][j]=server_wakeup_counter[k][j]*wake_up_latency;
 		}
@@ -630,6 +637,7 @@ int main(int argc, char **argv){
 		for(j=0;j<m;j++){
 			per_core_total_time[i][j]=per_core_busy[i][j]+per_core_idle[i][j]+per_core_wakeup[i][j];
 			per_core_busy_ratio[i][j]=per_core_busy[i][j]/per_core_total_time[i][j];
+			// printf("%d\t%d\t%f\n",i,j,per_core_busy_ratio[i][j]);
 			per_core_idle_ratio[i][j]=per_core_idle[i][j]/per_core_total_time[i][j];
 			per_core_wakeup_ratio[i][j]=per_core_wakeup[i][j]/per_core_total_time[i][j];
 			
@@ -808,9 +816,12 @@ int main(int argc, char **argv){
 	if(!quiet){
 		printf("AGG:\t%-5d\t%d\t",num_ISN,m);
 	}
-	printf("%d\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\n",p,time_out_counter*1.0/Agg_pkt_processed,avg_drop,avg_quality,total_power,agg_nfp,agg_nnp);
+	printf("%d\t%d\t%.4f\t%.4f\t%.4f\t%.4f\t%d\t%d\n",p,reQuery_threshold,time_out_counter*1.0/Agg_pkt_processed,avg_drop,total_power,avg_quality,agg_nfp,agg_nnp);
 	// printf("%d\t%.2f\t%f\t%f\t%d\t%d\t%d\t%d\t%d\tC%d\n",m,p,(Pa*(overall_busy_ratio+overall_wakeup_ratio)+Pc*overall_idle_ratio)*m,overall_latency/pkt_processed,nfp,nnp,agg_nfp,agg_nnp,0,C_state);
-	
+	// printf("%f\n",arr/PKT_limit);
+	// for(i=0;i<num_ISN;i++){
+		// printf("%f\n",ser[i]/pkt_processed[i]);
+	// }
 	return 0;
 
 }

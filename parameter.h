@@ -6,12 +6,12 @@
 #define package_sleep 0
 #define SIM_TIME DBL_MAX
 #define Queue_length 1024
-#define bin_count 1000000
+#define bin_count 100000
 #define bin_width 1
 // #define agg_timeout 1500000
-#define agg_collect 10000
+#define agg_collect 10
 // #define ISN_timeout 150000
-#define ISN_prediction_overhead 7000
+#define ISN_prediction_overhead 7
 // #define reQuery_threshold 15
 #ifdef ivy
 #define server_count 4 //no of servers

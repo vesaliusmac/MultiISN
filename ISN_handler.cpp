@@ -43,7 +43,10 @@ int handle_arrive(int which_ISN, double cur_time, double* event){
 		// log the idle period
 		which_bin=floor((time-server[which_ISN][pick].time_arrived)/bin_width);
 		if(which_bin<0) {printf("latency error %d\n",__LINE__); return 0;}
-		if (which_bin > bin_count-1) which_bin=bin_count-1;
+		if (which_bin > bin_count-1) {
+			printf("idle which_bin too large %d\t%d\n",which_bin,bin_count-1);
+			which_bin=bin_count-1;
+		}
 		server_idle_time_hist[which_ISN][pick][which_bin]++;
 		server_idle_counter[which_ISN][pick]++;
 		
@@ -57,7 +60,8 @@ int handle_arrive(int which_ISN, double cur_time, double* event){
 			return -1;
 		}
 		// determine pkt service time
-		service_time_temp=query_service_time[fetched_pkt.index%num_line][which_ISN]*1000;
+		service_time_temp=query_service_time[fetched_pkt.index%num_line][which_ISN];
+		ser[which_ISN]+=service_time_temp;
 		if(fetched_pkt.disable_drop==0){
 			if(service_time_temp>ISN_timeout){// too long, dropped
 				fetched_pkt.service_time=ISN_prediction_overhead;
@@ -86,7 +90,7 @@ int handle_arrive(int which_ISN, double cur_time, double* event){
 		if(package_sleep!=0){
 			if(package[which_ISN].time_arrived!=0){
 				which_bin=floor((time-package[which_ISN].time_arrived)/bin_width);
-				if(which_bin<0) {printf("latency error %d\n",__LINE__); return 0;}
+				if(which_bin<0) {printf("latency error %d\n",__LINE__); return -1;}
 				if (which_bin > bin_count-1) which_bin=bin_count-1;
 				package_idle_time_hist[which_ISN][which_bin]++;
 				package[which_ISN].time_arrived=-1;
@@ -123,6 +127,8 @@ int handle_depart(int which_ISN, double cur_time, double* event, double* Agg_eve
 	int i,pick;
 	static double time;
 	static Pkt fetched_pkt, departed_pkt;
+	static double service_time_temp;
+	
 	time = cur_time;
 	// find which server has finished pkts
 	pick=-1;
@@ -180,6 +186,22 @@ int handle_depart(int which_ISN, double cur_time, double* event, double* Agg_eve
 			printf("deQ error\n");
 			return -1;
 		}
+		// determine pkt service time
+		service_time_temp=query_service_time[fetched_pkt.index%num_line][which_ISN];
+		ser[which_ISN]+=service_time_temp;
+		if(fetched_pkt.disable_drop==0){
+			if(service_time_temp>ISN_timeout){// too long, dropped
+				fetched_pkt.service_time=ISN_prediction_overhead;
+				fetched_pkt.reply_drop=1;
+				
+			}else{
+				fetched_pkt.service_time=service_time_temp;
+				fetched_pkt.reply_drop=0;
+			}
+		}else{
+			fetched_pkt.service_time=service_time_temp;
+			fetched_pkt.reply_drop=0;
+		}
 		server[which_ISN][pick].cur_pkt=fetched_pkt;
 		// server[which_ISN][pick].cur_pkt.handled=pick;
 		server[which_ISN][pick].time_finished=time+server[which_ISN][pick].cur_pkt.service_time;
@@ -189,8 +211,11 @@ int handle_depart(int which_ISN, double cur_time, double* event, double* Agg_eve
 	} else{ // no queue pkts, server goes idle
 		
 		which_bin=floor((time-server[which_ISN][pick].time_arrived)/bin_width);
-		if(which_bin<0) {printf("latency error %d\n",__LINE__); return 0;}
-		if (which_bin > bin_count-1) which_bin=bin_count-1;
+		if(which_bin<0) {printf("latency error %d\n",__LINE__); return -1;}
+		if (which_bin > bin_count-1){
+			printf("busy which_bin too large %d\t%d\n",which_bin,bin_count-1);
+			which_bin=bin_count-1;
+		}
 		server_busy_time_hist[which_ISN][pick][which_bin]++;
 		
 		server_busy_counter[which_ISN][pick]++;
